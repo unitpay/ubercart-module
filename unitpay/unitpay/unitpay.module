@@ -1,0 +1,232 @@
+<?php
+
+
+
+/**
+ * Implements hook_menu().
+ */
+function unitpay_menu() {
+    $items['unitpay/callback'] = array(
+        'title' => 'Unitpay',
+        'page callback' => 'unitpay_callback',
+        'access callback' => TRUE,
+        'type' => MENU_CALLBACK,
+
+    );
+
+    return $items;
+}
+
+/**
+ * Add SpryPay settings to the payment method settings form.
+ *
+ * @see uc_sprypay_payment_method()
+ */
+function unitpay_payment_method($op, &$arg1) {
+    switch ($op) {
+        case 'settings':
+            $form['unitpay_public_key'] = array(
+                '#type' => 'textfield',
+                '#title' => t('PUBLIC KEY'),
+                '#description' => t('Скопируйте PUBLIC KEY со страницы проекта в системе Unitpay'),
+                '#default_value' => variable_get('unitpay_public_key', ''),
+                '#size' => 16,
+            );
+            $form['unitpay_secret_key'] = array(
+                '#type' => 'textfield',
+                '#title' => t('SECRET KEY'),
+                '#description' => t('Скопируйте SECRET KEY со страницы проекта в системе Unitpay'),
+                '#default_value' => variable_get('unitpay_secret_key', ''),
+                '#size' => 16,
+            );
+            return $form;
+    }
+}
+
+/**
+ * Implementation of hook_uc_payment_method().
+ *
+ * @see unitpay_payment_method()
+ */
+function unitpay_uc_payment_method() {
+    $path = base_path() . drupal_get_path('module', 'unitpay');
+    $title = '<img src="'. $path .'/unitpay.png">'.t('Unitpay');
+    $methods[] = array(
+        'id' => 'unitpay',
+        'name' => t('Unitpay'),
+        'title' => $title,
+        'desc' => t('Redirect to Unitpay'),
+        'callback' => 'unitpay_payment_method',
+        'redirect' => 'unitpay_request_payment_form',
+        'weight' => 3,
+        'checkout' => TRUE,
+        'no_gateway' => TRUE,
+    );
+    return $methods;
+}
+
+function unitpay_request_payment_form($form, &$form_state, $order) {
+
+    $form  = '<form name="unitpay" action="'. 'http://unitpay.ru/pay/' . variable_get('unitpay_public_key') . '" method="get">';
+    $form .= '<input type="hidden" name="sum" value="' . $order->order_total . '"/>';
+    $form .= '<input type="hidden" name="account" value="' . $order->order_id . '"/>';
+    $form .= '<input type="hidden" name="desc" value="Платеж по заказу №' . $order->order_id . '"/>';
+    $form .= '</form>';
+    $form .= '<script type="text/javascript"> document.forms.unitpay.submit(); </script>';
+
+    echo $form;
+    die();
+}
+
+function unitpay_callback(){
+
+    header('Content-type:application/json;  charset=utf-8');
+
+    $method = '';
+    $params = [];
+
+    if ((isset($_GET['params'])) && (isset($_GET['method'])) && (isset($_GET['params']['signature']))){
+        $params = $_GET['params'];
+        $method = $_GET['method'];
+        $signature = $params['signature'];
+
+        if (empty($signature)){
+            $status_sign = false;
+        }else{
+            $secret_key = variable_get('unitpay_secret_key');
+            $status_sign = unitpay_verifySignature($params, $method, $secret_key);
+        }
+    }else{
+        $status_sign = false;
+    }
+
+//        $status_sign = true;
+
+    if ($status_sign){
+        switch ($method) {
+            case 'check':
+                $result = uc_unitpay_check( $params );
+                break;
+            case 'pay':
+                $result = uc_unitpay_payment( $params );
+                break;
+            case 'error':
+                $result = uc_unitpay_error( $params );
+                break;
+            default:
+                $result = array('error' =>
+                    array('message' => 'неверный метод')
+                );
+                break;
+        }
+    }else{
+        $result = array('error' =>
+            array('message' => 'неверная сигнатура')
+        );
+    }
+
+    echo json_encode($result);
+    die();
+}
+
+
+function unitpay_verifySignature($params, $method, $secret)
+{
+    return $params['signature'] == unitpay_getSignature($method, $params, $secret);
+}
+function unitpay_getSignature($method, array $params, $secretKey)
+{
+    ksort($params);
+    unset($params['sign']);
+    unset($params['signature']);
+    array_push($params, $secretKey);
+    array_unshift($params, $method);
+    return hash('sha256', join('{up}', $params));
+}
+function uc_unitpay_check( $params )
+{
+
+    $order_id = $params['account'];
+    $order = $order_id ? uc_order_load($order_id) : null;
+
+    if (!$order){
+        $result = array('error' =>
+            array('message' => 'заказа не существует')
+        );
+    }else{
+        $currency = $order->currency;
+        $sum = $order->order_total;
+
+        if ((float)$sum != (float)$params['orderSum']) {
+            $result = array('error' =>
+                array('message' => 'не совпадает сумма заказа')
+            );
+        }elseif ($currency != $params['orderCurrency']) {
+            $result = array('error' =>
+                array('message' => 'не совпадает валюта заказа')
+            );
+        }
+        else{
+            $result = array('result' =>
+                array('message' => 'Запрос успешно обработан')
+            );
+        }
+    }
+
+    return $result;
+}
+
+function uc_unitpay_payment( $params )
+{
+
+    $order_id = $params['account'];
+    $order = $order_id ? uc_order_load($order_id) : null;
+
+    if (!$order){
+        $result = array('error' =>
+            array('message' => 'заказа не существует')
+        );
+    }else{
+        $currency = $order->currency;
+        $sum = $order->order_total;
+
+        if ((float)$sum != (float)$params['orderSum']) {
+            $result = array('error' =>
+                array('message' => 'не совпадает сумма заказа')
+            );
+        }elseif ($currency != $params['orderCurrency']) {
+            $result = array('error' =>
+                array('message' => 'не совпадает валюта заказа')
+            );
+        }
+        else{
+
+            uc_order_update_status($order_id, 'payment_received');
+
+            $result = array('result' =>
+                array('message' => 'Запрос успешно обработан')
+            );
+        }
+    }
+
+    return $result;
+}
+
+function uc_unitpay_error( $params )
+{
+    $order_id = $params['account'];
+    $order = $order_id ? uc_order_load($order_id) : null;
+
+    if (!$order){
+        $result = array('error' =>
+            array('message' => 'заказа не существует')
+        );
+    }
+    else{
+        uc_order_update_status($order_id, 'canceled');
+        $result = array('result' =>
+            array('message' => 'Запрос успешно обработан')
+        );
+    }
+    return $result;
+}
