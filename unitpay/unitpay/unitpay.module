@@ -25,6 +25,13 @@ function unitpay_menu() {
 function unitpay_payment_method($op, &$arg1) {
     switch ($op) {
         case 'settings':
+            $form['unitpay_domain'] = array(
+                '#type' => 'textfield',
+                '#title' => t('DOMAIN'),
+                '#description' => t('Ваш рабочий домен Unitpay'),
+                '#default_value' => variable_get('unitpay_domain', ''),
+                '#size' => 16,
+            );
             $form['unitpay_public_key'] = array(
                 '#type' => 'textfield',
                 '#title' => t('PUBLIC KEY'),
@@ -67,7 +74,9 @@ function unitpay_uc_payment_method() {
 
 function unitpay_request_payment_form($form, &$form_state, $order) {
 
-    $form  = '<form name="unitpay" action="'. 'http://unitpay.ru/pay/' . variable_get('unitpay_public_key') . '" method="get">';
+    $domain = variable_get('unitpay_domain');
+
+    $form  = '<form name="unitpay" action="'. "http://$domain/pay/" . variable_get('unitpay_public_key') . '" method="get">';
     $form .= '<input type="hidden" name="sum" value="' . $order->order_total . '"/>';
     $form .= '<input type="hidden" name="account" value="' . $order->order_id . '"/>';
     $form .= '<input type="hidden" name="desc" value="Платеж по заказу №' . $order->order_id . '"/>';
