@@ -75,16 +75,89 @@ function unitpay_uc_payment_method() {
 function unitpay_request_payment_form($form, &$form_state, $order) {
 
     $domain = variable_get('unitpay_domain');
+    $secret_key = variable_get('unitpay_secret_key');
+    $signature = hash('sha256', join('{up}', array(
+        $order->order_id,
+        'Заказ #' . $order->order_id,
+        $order->order_total,
+        $secret_key
+    )));
 
     $form  = '<form name="unitpay" action="'. "http://$domain/pay/" . variable_get('unitpay_public_key') . '" method="get">';
     $form .= '<input type="hidden" name="sum" value="' . $order->order_total . '"/>';
     $form .= '<input type="hidden" name="account" value="' . $order->order_id . '"/>';
-    $form .= '<input type="hidden" name="desc" value="Платеж по заказу №' . $order->order_id . '"/>';
+    $form .= '<input type="hidden" name="desc" value="Заказ #' . $order->order_id . '"/>';
+    $form .= '<input type="hidden" name="signature" value="' . $signature . '"/>';
+
+    $has_phone = $order->delivery_phone && (strlen($order->delivery_phone) > 0);
+    $has_email = $order->primary_email && (strlen($order->primary_email) > 0);
+
+    if ($has_phone) {
+        $contact_phone = preg_replace('/\D/', '', $order->delivery_phone);
+        $form .= '<input type="hidden" name="customerPhone" value="' . $contact_phone . '"/>';
+    }
+
+    if ($has_email) {
+        $form .= '<input type="hidden" name="customerEmail" value="' . $order->primary_email . '"/>';
+    }
+
+    if($has_email || $has_phone){
+        $form .= '<input type="hidden" name="cashItems" value="' . get_cash_items($order) . '"/>';
+    }
+
+
     $form .= '</form>';
     $form .= '<script type="text/javascript"> document.forms.unitpay.submit(); </script>';
 
     echo $form;
     die();
+}
+
+function get_cash_items($order)
+{
+    if (!$order) return '';
+
+    $currencyCode = $order->currency;
+
+    $orderProducts = array_map(function ($item) use ($currencyCode, $order) {
+        $vat = get_tax($order);
+
+        return array(
+            'name'     => $item->title,
+            'count'    => $item->qty,
+            'price'    => round($item->price, 2),
+            'currency' => $currencyCode,
+            'type'     => 'commodity',
+            'nds'      => $vat,
+        );
+    }, $order->products);
+
+    return base64_encode(json_encode($orderProducts));
+}
+
+function get_tax($order){
+    $vat = 'none';
+
+    foreach ($order->line_items as $item){
+        if ($item['type'] != 'tax') continue;
+        if ($item['data']['tax']->display_include) continue;
+
+        switch ($item['data']['tax_rate']){
+            case '0.2':
+                $vat= 'vat20';
+                break;
+            case '0.1':
+                $vat= 'vat10';
+                break;
+            case '0':
+                $vat= 'vat0';
+                break;
+            default:
+                $vat = 'none';
+        }
+    }
+    return $vat;
+
 }
 
 function unitpay_callback(){
