@@ -78,6 +78,7 @@ function unitpay_request_payment_form($form, &$form_state, $order) {
     $secret_key = variable_get('unitpay_secret_key');
     $signature = hash('sha256', join('{up}', array(
         $order->order_id,
+        $order->currency,
         'Заказ #' . $order->order_id,
         $order->order_total,
         $secret_key
