@@ -87,6 +87,7 @@ function unitpay_request_payment_form($form, &$form_state, $order) {
     $form  = '<form name="unitpay" action="'. "http://$domain/pay/" . variable_get('unitpay_public_key') . '" method="get">';
     $form .= '<input type="hidden" name="sum" value="' . $order->order_total . '"/>';
     $form .= '<input type="hidden" name="account" value="' . $order->order_id . '"/>';
+    $form .= '<input type="hidden" name="currency" value="' . $order->currency . '"/>';
     $form .= '<input type="hidden" name="desc" value="Заказ #' . $order->order_id . '"/>';
     $form .= '<input type="hidden" name="signature" value="' . $signature . '"/>';
 
@@ -122,11 +123,21 @@ function get_cash_items($order)
 
     $orderProducts = array_map(function ($item) use ($currencyCode, $order) {
         $vat = get_tax($order);
-
+        switch ($vat){
+            case 'vat20':
+                $price = round($item->price * 1.2, 2);
+                break;
+            case 'vat10':
+                $price = round($item->price * 1.1, 2);
+                break;
+            case 'none':
+            default:
+                $price = round($item->price , 2);
+        }
         return array(
             'name'     => $item->title,
             'count'    => $item->qty,
-            'price'    => round($item->price, 2),
+            'price'    => $price,
             'currency' => $currencyCode,
             'type'     => 'commodity',
             'nds'      => $vat,
@@ -141,7 +152,6 @@ function get_tax($order){
 
     foreach ($order->line_items as $item){
         if ($item['type'] != 'tax') continue;
-        if ($item['data']['tax']->display_include) continue;
 
         switch ($item['data']['tax_rate']){
             case '0.2':
@@ -264,6 +274,7 @@ function uc_unitpay_payment( $params )
 
     $order_id = $params['account'];
     $order = $order_id ? uc_order_load($order_id) : null;
+
 
     if (!$order){
         $result = array('error' =>
